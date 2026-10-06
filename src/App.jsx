@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signInWithEmailAndPassword,
   onAuthStateChanged, signOut
 } from "firebase/auth";
 import {
@@ -8,7 +8,7 @@ import {
   collectionGroup, query, where, orderBy, serverTimestamp,
   deleteDoc, onSnapshot, updateDoc, runTransaction
 } from "firebase/firestore";
-import { auth, db, ADMIN_EMAIL, ADMIN_PASSWORD, toEmail } from "./firebase";
+import { auth, db, toEmail, createAccount } from "./firebase";
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
 const AV_COLORS = ["#1e3a5f","#1a4731","#5c2d0e","#2d3a8c","#4a1a5c","#2d4a6a","#3a1a4a","#1a3a4a"];
@@ -274,8 +274,7 @@ const AddClientSheet = ({adminUser, onClose, onCreated, toast}) => {
     const color = randC();
     let newUid = null;
     try {
-      const cred = await createUserWithEmailAndPassword(auth, toEmail(username), password);
-      newUid = cred.user.uid;
+      newUid = await createAccount(toEmail(username), password);
       await setDoc(doc(db,"users",newUid), {
         uid:newUid, username, fullName:fullName.trim(),
         email:toEmail(username), role, plan:"Business",
@@ -283,13 +282,10 @@ const AddClientSheet = ({adminUser, onClose, onCreated, toast}) => {
         createdAt:serverTimestamp(), createdBy:adminUser.uid,
         balance:0, totalHoursMs:0,
       });
-      // Re-sign in as admin
-      await signInWithEmailAndPassword(auth, ADMIN_EMAIL, ADMIN_PASSWORD);
       setSuccess({username, password, fullName:fullName.trim(), role});
       onCreated();
       toast(`@${username} created ✓`,"ok");
     } catch(e) {
-      if(newUid){ try{ await signInWithEmailAndPassword(auth,ADMIN_EMAIL,ADMIN_PASSWORD); }catch{} }
       if(e.code==="auth/email-already-in-use") setErrors(x=>({...x,username:"Username already exists"}));
       else toast("Error: "+e.message,"err");
     }

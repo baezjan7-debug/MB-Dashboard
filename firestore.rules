@@ -1,26 +1,86 @@
+// IMPORTANTE: Estas reglas se aplican en Firebase Console → Firestore → Rules
+// (pégalas ahí y presiona Publicar). Este archivo es solo la copia de referencia.
+//
+// MB Invoice y MB-Dashboard comparten el mismo proyecto de Firebase, así que
+// estas reglas cubren las dos apps:
+// - Admin = usuario cuyo documento en /users tiene role == "admin". Puede todo.
+//   La cuenta con la que entras a MB Invoice tiene que ser admin.
+// - Cualquier otro usuario (cliente) solo ve sus propias facturas, comentarios,
+//   notificaciones, horas y su propio perfil.
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /clients/{doc} {
-      allow read, write: if true;
+
+    function signedIn() {
+      return request.auth != null;
     }
+
+    function isAdmin() {
+      let userDoc = /databases/$(database)/documents/users/$(request.auth.uid);
+      return signedIn() && exists(userDoc) && get(userDoc).data.role == "admin";
+    }
+
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // Solo el admin (datos internos del negocio)
+    match /clients/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /meta/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /pushSubscriptions/{id} {
+      allow read, write: if isAdmin();
+    }
+
     match /invoices/{invoiceId} {
-      allow read, write: if true;
+      allow read: if isAdmin() || (signedIn() && resource.data.clientUid == request.auth.uid);
+      allow create, delete: if isAdmin();
+      // El cliente solo puede "Confirmar recibida" (sent → viewed) en su propia factura.
+      allow update: if isAdmin() || (
+        signedIn() && resource.data.clientUid == request.auth.uid
+        && resource.data.status == "sent"
+        && request.resource.data.status == "viewed"
+        && onlyChanges(["status", "updatedAt"])
+      );
+
       match /comments/{commentId} {
-        allow read, write: if true;
+        function ownsInvoice() {
+          return signedIn()
+            && get(/databases/$(database)/documents/invoices/$(invoiceId)).data.clientUid == request.auth.uid;
+        }
+        allow read: if isAdmin() || ownsInvoice();
+        allow create: if isAdmin() || (ownsInvoice() && request.resource.data.isAdmin == false);
+        allow update, delete: if isAdmin();
       }
     }
+
     match /users/{userId} {
-      allow read, write: if true;
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      // Al crear una cuenta, el Dashboard escribe el perfil con la sesión del
+      // usuario nuevo: se permite, pero nunca con role "admin".
+      allow create: if isAdmin() || (
+        signedIn() && request.auth.uid == userId
+        && request.resource.data.role in ["client", "manager"]
+      );
+      allow update, delete: if isAdmin();
+
       match /sessions/{sessionId} {
-        allow read, write: if true;
+        allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+        allow write: if isAdmin();
       }
     }
-    match /notifications/{doc} {
-      allow read, write: if true;
-    }
-    match /meta/{doc} {
-      allow read, write: if true;
+
+    match /notifications/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create, delete: if isAdmin();
+      // El cliente solo puede marcar sus notificaciones como leídas.
+      allow update: if isAdmin() || (
+        signedIn() && resource.data.uid == request.auth.uid && onlyChanges(["read"])
+      );
     }
   }
 }
