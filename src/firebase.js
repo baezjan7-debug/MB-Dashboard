@@ -1,5 +1,5 @@
-import { initializeApp, getApps } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { initializeApp, getApps, deleteApp } from "firebase/app";
+import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // ── Single shared Firebase project ───────────────────────────────────────────
@@ -18,10 +18,20 @@ export const auth = getAuth(app);
 export const db   = getFirestore(app);
 
 // Keep original email convention so existing accounts still work
-export const ADMIN_EMAIL    = "mbaez86@mbdasboard.internal";
-export const ADMIN_PASSWORD = "141414";
 export const toEmail = (u) => `${u.toLowerCase().trim()}@mbdasboard.internal`;
 
 // Notification stubs (no FCM needed)
 export const requestNotificationPermission = async () => null;
 export const onForegroundMessage = () => () => {};
+
+// Creates a login on a throwaway app instance, so the admin creating the
+// account stays signed in on the main one (no need to know their password).
+export const createAccount = async (email, password) => {
+  const tmp = initializeApp(firebaseConfig, `create-account-${Date.now()}`);
+  try {
+    const cred = await createUserWithEmailAndPassword(getAuth(tmp), email, password);
+    return cred.user.uid;
+  } finally {
+    await deleteApp(tmp);
+  }
+};
